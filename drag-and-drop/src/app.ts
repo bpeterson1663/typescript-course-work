@@ -13,13 +13,21 @@ class Project {
     }
 }
 
-type Listner = (items: Project[]) => void
-class ProjectState {
-    private listeners: Listner[] = []
+type Listener<T> = (items: T[]) => void
+
+class State<T> {
+    protected listeners: Listener<T>[] = []
+    addListener(listenerFn: Listener<T>){
+        this.listeners.push(listenerFn)
+    }
+}
+
+class ProjectState extends State<Project> {
     private projects: Project[] = []
     private static instance: ProjectState
-    private constructor() {
 
+    private constructor() {
+        super()
     }
 
     static getInstance() {
@@ -38,9 +46,7 @@ class ProjectState {
         }
     }
 
-    addListener(listenerFn: Listner){
-        this.listeners.push(listenerFn)
-    }
+    
 }
 
 const projectState = ProjectState.getInstance()
@@ -87,21 +93,47 @@ function autobind(_: any, _2: string, descriptor: PropertyDescriptor) {
     return adjDescriptor
 }
 
-class ProjectList {
+abstract class Component<T extends HTMLElement, U extends HTMLElement> {
     templateElement: HTMLTemplateElement;
-    hostElement: HTMLDivElement;
-    element: HTMLElement
-    assignedProjects: Project[]
+    hostElement: T;
+    element: U
 
-    constructor(private type: 'active' | 'finished') {
-        this.templateElement = document.getElementById('project-list')! as HTMLTemplateElement
-        this.hostElement = document.getElementById('app')! as HTMLDivElement
-        this.assignedProjects = []
-    
+    constructor(templateId: string, hostElementId: string, insertAtStart: boolean, newElementId?: string){
+        this.templateElement = document.getElementById(templateId)! as HTMLTemplateElement
+        this.hostElement = document.getElementById(hostElementId)! as T
+
         const importedNode = document.importNode(this.templateElement.content, true)
-        this.element = importedNode.firstElementChild as HTMLElement;
-        this.element.id = `${this.type}-projects`
-        
+        this.element = importedNode.firstElementChild as U;
+        if(newElementId){
+            this.element.id = newElementId
+        }
+
+        this.attach(insertAtStart)
+    }
+
+    private attach(insertAtStart: boolean) {
+        if(insertAtStart){
+            this.hostElement.insertAdjacentElement('afterbegin', this.element)
+
+        }else {
+            this.hostElement.insertAdjacentElement('beforeend', this.element)
+
+        }
+    }
+
+    abstract configure(): void;
+    abstract renderContent(): void;
+}
+
+class ProjectList extends Component<HTMLDivElement, HTMLElement>{
+    assignedProjects: Project[]
+    constructor(private type: 'active' | 'finished') {
+        super('project-list', 'app', false, `${type}-projects`)
+        this.assignedProjects = []
+        this.configure()
+        this.renderContent()
+    }
+    configure() {
         projectState.addListener((projects: Project[]) => {
             const relevantProjects = projects.filter(prj => {
                 if(this.type === 'active'){
@@ -112,11 +144,13 @@ class ProjectList {
             this.assignedProjects = relevantProjects
             this.renderProjects();
         })
-        
-        this.attach()
-        this.renderContent()
     }
 
+    renderContent() {
+        const listId = `${this.type}-project-list`
+        this.element.querySelector('ul')!.id = listId;
+        this.element.querySelector('h2')!.textContent = this.type.toUpperCase() + ' PROJECTS';
+    }
     private renderProjects() {
         const listEl = document.getElementById(`${this.type}-project-list`)! as HTMLUListElement
         listEl.innerHTML = ''
@@ -126,42 +160,26 @@ class ProjectList {
             listEl?.appendChild(listItem)
         }
     }
-
-    private renderContent() {
-        const listId = `${this.type}-project-list`
-        this.element.querySelector('ul')!.id = listId;
-        this.element.querySelector('h2')!.textContent = this.type.toUpperCase() + ' PROJECTS';
-    }
-
-    private attach() {
-        this.hostElement.insertAdjacentElement('beforeend', this.element)
-    }
 }
 
-
-class ProjectInput {
-    templateElement: HTMLTemplateElement;
-    hostElement: HTMLDivElement;
-    formElement: HTMLFormElement;
+class ProjectInput extends Component<HTMLDivElement, HTMLFormElement> {
     titleInputElement: HTMLInputElement;
     descriptionInputElement: HTMLInputElement;
     peopleInputElement: HTMLInputElement;
     constructor() {
-        this.templateElement = document.getElementById('project-input')! as HTMLTemplateElement; // ! indicates we tell typescript it will not be null
-        this.hostElement = document.getElementById('app')! as HTMLDivElement;
-    
-        const importedNode = document.importNode(this.templateElement.content, true);
-        this.formElement = importedNode.firstElementChild as HTMLFormElement;
-        this.formElement.id = 'user-input';
-
-        this.titleInputElement = this.formElement.querySelector('#title') as HTMLInputElement;
-        this.descriptionInputElement = this.formElement.querySelector('#description') as HTMLInputElement;
-        this.peopleInputElement = this.formElement.querySelector('#people') as HTMLInputElement;
+        super('project-input', 'app', true, 'user-input')
+        this.titleInputElement = this.element.querySelector('#title') as HTMLInputElement;
+        this.descriptionInputElement = this.element.querySelector('#description') as HTMLInputElement;
+        this.peopleInputElement = this.element.querySelector('#people') as HTMLInputElement;
         
         this.configure()
-        this.attach();
     }
 
+    configure() {
+        this.element.addEventListener('submit', this.submitHandler)
+    }
+
+    renderContent() {}
     private gatherUserInput(): [string, string, number] | void {
         const enteredTitle = this.titleInputElement.value
         const enteredDescription = this.descriptionInputElement.value
@@ -193,7 +211,6 @@ class ProjectInput {
     @autobind
     private submitHandler(event: Event){
         event.preventDefault()
-        console.log(this.titleInputElement.value)
         const userInput = this.gatherUserInput()
         if(Array.isArray(userInput)){
             const [title, desc, people] = userInput;
@@ -203,13 +220,6 @@ class ProjectInput {
         }
     }
 
-    private configure() {
-        this.formElement.addEventListener('submit', this.submitHandler)
-    }
-
-    private attach() {
-        this.hostElement.insertAdjacentElement('afterbegin', this.formElement)
-    }
 
     private clearInputs() {
         this.titleInputElement.value = '';
